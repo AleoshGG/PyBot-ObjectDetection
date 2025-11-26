@@ -1,8 +1,16 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-opencv-python==4.8.1.78
-ultralytics==8.0.186
-python-multipart==0.0.6
-websockets==12.0
-requests==2.31.0
-numpy==1.24.3
+# --- Core AI stack (compatibles con YOLO antiguos) ---
+ultralytics==8.0.20
+torch==2.0.1
+torchvision==0.15.2
+
+# --- FastAPI & Server ---
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+
+# --- Image / Utils ---
+opencv-python-headless==4.9.0.80
+numpy==1.24.4
+pydantic==1.10.14
+
+# --- Otros opcionales ---
+python-multipart==0.0.9

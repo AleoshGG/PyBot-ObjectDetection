@@ -1,56 +1,57 @@
-# Stage 1: Build stage with build-essentials to compile dependencies
-FROM python:3.9.18-slim as builder
-
-# Install system dependencies required for building Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-WORKDIR /app
-
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
-
-
-# Stage 2: Final production image
+# -------------------------------------------------------
+# Base image
+# -------------------------------------------------------
 FROM python:3.9.18-slim
 
-# Set metadata labels
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 LABEL maintainer="Gemini"
-LABEL description="Optimized Docker image for PyBot-ObjectDetection FastAPI service."
+LABEL description="FastAPI + YOLO (Ultralytics 8.0.20) - CPU optimized"
 
-# Create a non-root user for security
-RUN useradd --create-home appuser
-WORKDIR /home/appuser/app
-
-# Install required system libraries for OpenCV and other packages
+# -------------------------------------------------------
+# System dependencies
+# -------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
+    build-essential \
+    ffmpeg \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
+    libxrender1 \
+    libjpeg-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python dependencies from the builder stage
-COPY --from=builder /app/wheels /wheels
-COPY --from=builder /app/requirements.txt .
-RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
+# -------------------------------------------------------
+# App user
+# -------------------------------------------------------
+RUN useradd --create-home appuser
+WORKDIR /home/appuser/app
 
-# Copy application code
+# -------------------------------------------------------
+# Install Python dependencies
+# -------------------------------------------------------
+COPY requirements.txt ./
+
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.0.1 torchvision==0.15.2 && \
+    pip install --no-cache-dir -r requirements.txt
+
+# -------------------------------------------------------
+# Copy source code
+# -------------------------------------------------------
 COPY --chown=appuser:appuser . .
 
-# Change ownership of the app directory
 RUN chown -R appuser:appuser /home/appuser/app
-
-# Switch to the non-root user
 USER appuser
 
-# Expose the port the app runs on
+# -------------------------------------------------------
+# Expose port
+# -------------------------------------------------------
 EXPOSE 1200
 
-# Command to run the application using Uvicorn
-# Using --workers 1 as recommended in app.py, and letting the internal thread pool handle concurrency.
+# -------------------------------------------------------
+# Start API
+# -------------------------------------------------------
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "1200", "--workers", "1"]
