@@ -1,15 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, WebSocket, Form
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-import asyncio
-import base64
-from typing import List, Dict, Any
-import json
-
+from src.detections.services.inference_service import InferenceService
 from src.detections.controller.detections_controller import router
 from src.detections.handler.websocket_handler import websocket_handler
 
-app = FastAPI(title="Object Detection Service")
+from fastapi import FastAPI, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import uvicorn
+from concurrent.futures import ThreadPoolExecutor
+
+app = FastAPI(title="High Performance Object Detection Service")
 
 # CORS middleware
 app.add_middleware(
@@ -19,21 +19,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routes
-app.include_router(router, prefix="/api/v1")
+# Global thread pool for CPU-intensive tasks
+thread_pool = ThreadPoolExecutor(max_workers=4)
 
-@app.get("/")
-async def root():
-    return {"message": "Object Detection Service Running"}
+# Services
+inference_service = InferenceService(thread_pool)
+
+# Include API routes
+app.include_router(router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "object_detection"}
+    return {
+        "status": "healthy", 
+        "service": "object_detection",
+        "active_connections": len(websocket_handler.active_connections)
+    }
 
 if __name__ == "__main__":
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
-        workers=1
+        port=1200,
+        workers=1,  # Usar 1 worker y manejar concurrencia internamente
+        loop="asyncio"
     )
