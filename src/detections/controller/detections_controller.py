@@ -1,4 +1,7 @@
+import json
+import os
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from src.detections.services.rabbitmq_service import RabbitMQService
 from src.detections.data.schemas import InferenceResponse, DetectionResult
 from src.detections.services.inference_service import InferenceService
 from src.detections.handler.websocket_handler import websocket_handler
@@ -6,8 +9,13 @@ import asyncio
 import base64
 import time
 import uuid
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter()
+# Instancia global del servicio RabbitMQ
+rabbitmq_service = RabbitMQService()
 
 @router.post("/detect", response_model=InferenceResponse)
 async def detect_objects(
@@ -41,10 +49,10 @@ async def detect_objects(
             request_id=request_id
         )
         
-        # Enviar al WebSocket en segundo plano (no esperar)
+        # Enviar a RabbitMQ en segundo plano (no esperar)
         if result['processed_image']:
             background_tasks.add_task(
-                broadcast_to_websocket,
+                send_to_rabbitmq,
                 prototype_id,
                 result['detections'],
                 result['processed_image'],
@@ -57,47 +65,52 @@ async def detect_objects(
         print(f"Error en request {request_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
-async def broadcast_to_websocket(prototype_id: str, detections: list, processed_image: bytes, timestamp: str):
-    """Transmisión asíncrona al WebSocket"""
+async def send_to_rabbitmq(prototype_id: str, detections: list, processed_image: bytes, timestamp: str):
+    """Enviar datos CAM a RabbitMQ de forma asíncrona"""
     try:
+        # Convertir detections a string JSON
+        detections_str = json.dumps(detections)
+        
+        # Codificar imagen a base64
         encoded_image = base64.b64encode(processed_image).decode('utf-8')
-        websocket_data = {
+        
+        # Crear estructura CAM
+        cam_data = {
             "prototype_id": prototype_id,
-            "detections": detections,
-            "image": encoded_image,
-            "timestamp": timestamp
+            "detections": detections_str,  # Serializado como string JSON
+            "image": encoded_image
         }
         
-        await websocket_handler.broadcast_json(websocket_data)
-    except Exception as e:
-        print(f"Error en broadcast WebSocket: {e}")
-
-@router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    # Conectar el cliente
-    await websocket_handler.connect(websocket)
-    
-    try:
-        # Mantener la conexión activa
-        while True:
-            # Recibir cualquier mensaje (puede ser un ping)
-            data = await websocket.receive_text()
-            # Opcional: puedes manejar mensajes del cliente aquí
-            # Por ejemplo, si quieres que el cliente envíe comandos
-            
-    except WebSocketDisconnect:
-        websocket_handler.disconnect(websocket)
-    except Exception as e:
-        print(f"Error en WebSocket: {e}")
-        websocket_handler.disconnect(websocket)
+        # Enviar a RabbitMQ
+        await rabbitmq_service.send_cam_data(cam_data)
         
+    except Exception as e:
+        print(f"Error enviando a RabbitMQ: {e}")
+
 @router.get("/stats")
 async def get_stats():
     """Endpoint para monitorear rendimiento"""
     return router.inference_service.get_stats()
 
-# Inicializar el servicio después de definir el router
+# Inicializar servicios después de definir el router
 @router.on_event("startup")
 async def startup_event():
     from app import thread_pool
     router.inference_service = InferenceService(thread_pool)
+    
+    # Conectar a RabbitMQ
+    try:
+        # Obtener URL de RabbitMQ desde variables de entorno o configuración
+        rabbitmq_url = os.getenv("URL_RABBIT")  # Reemplazar con tu URL real
+        
+        await rabbitmq_service.connect(rabbitmq_url)
+        print("Servicio RabbitMQ inicializado exitosamente")
+        
+    except Exception as e:
+        print(f"Error inicializando RabbitMQ: {e}")
+
+@router.on_event("shutdown")
+async def shutdown_event():
+    """Cerrar conexiones al apagar la aplicación"""
+    await rabbitmq_service.close()
+    print("Conexión RabbitMQ cerrada")
