@@ -1,9 +1,11 @@
 import aio_pika
 import json
+
 class RabbitMQService:
     def __init__(self):
         self.connection = None
         self.channel = None
+        self.exchange = None
 
     async def connect(self, rabbitmq_url: str):
         """Conectar a RabbitMQ"""
@@ -11,7 +13,7 @@ class RabbitMQService:
             self.connection = await aio_pika.connect_robust(rabbitmq_url)
             self.channel = await self.connection.channel()
             
-            # Declarar el exchange topic (opcional - si quieres asegurar que existe)
+            # Declarar el exchange topic
             self.exchange = await self.channel.declare_exchange(
                 "amq.topic", 
                 aio_pika.ExchangeType.TOPIC,
@@ -32,21 +34,21 @@ class RabbitMQService:
     async def send_cam_data(self, cam_data: dict):
         """Enviar datos CAM a RabbitMQ"""
         try:
-            if not self.channel:
-                raise Exception("Canal de RabbitMQ no disponible")
+            if not self.exchange:
+                raise Exception("Exchange de RabbitMQ no disponible")
 
             # Crear mensaje
             message_body = json.dumps(cam_data).encode()
             
-            # Publicar en el exchange
-            await self.channel.default_exchange.publish(
+            # Publicar en el exchange amq.topic con routing key "cam"
+            await self.exchange.publish(
                 aio_pika.Message(
                     body=message_body,
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT
                 ),
                 routing_key="cam"
             )
-            print(f"Datos CAM enviados a RabbitMQ - Prototype: {cam_data['prototype_id']}")
+            print(f"Datos CAM enviados a RabbitMQ Exchange 'amq.topic' - Prototype: {cam_data['prototype_id']}")
             
         except Exception as e:
             print(f"Error enviando datos a RabbitMQ: {e}")
