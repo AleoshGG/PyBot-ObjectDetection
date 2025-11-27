@@ -1,6 +1,5 @@
 import aio_pika
 import json
-
 class RabbitMQService:
     def __init__(self):
         self.connection = None
@@ -11,6 +10,15 @@ class RabbitMQService:
         try:
             self.connection = await aio_pika.connect_robust(rabbitmq_url)
             self.channel = await self.connection.channel()
+            
+            # Declarar el exchange topic (opcional - si quieres asegurar que existe)
+            self.exchange = await self.channel.declare_exchange(
+                "amq.topic", 
+                aio_pika.ExchangeType.TOPIC,
+                durable=True,
+                passive=True  # Solo verifica que existe, no lo crea
+            )
+            
             print("Conexión a RabbitMQ establecida exitosamente")
         except Exception as e:
             print(f"Error conectando a RabbitMQ: {e}")
